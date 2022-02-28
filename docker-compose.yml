@@ -1,0 +1,46 @@
+version: '3.7'
+services:
+  neo4j:
+    image: neo4j:4.4.2
+    restart: always
+    hostname: neo4j
+    container_name: neo4j
+    ports:
+      - 7474:7474
+      - 7687:7687
+    volumes:
+      - ./neo4j/data:/data
+    environment:
+      - NEO4J_AUTH=neo4j/letmein
+      - NEO4JLABS_PLUGINS=["apoc", "graph-data-science"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*,gds.*
+  import:
+    build:
+      context: ./import
+    hostname: import
+    restart: always
+    container_name: import
+    links:
+        - neo4j
+    depends_on:
+      - neo4j
+  neodash:
+    image: nielsdejong/neodash
+    restart: always
+    hostname: neodash
+    container_name: neodash
+    ports:
+      - 8080:8080
+    environment:
+      - port=8080
+      - standalone=true
+      - standaloneProtocol=neo4j
+      - standaloneHost=neo4j
+      - standalonePort=7687
+      - standaloneDatabase=neo4j
+      - standaloneDashboardName=Bitcoin
+      - standaloneDashboardDatabase=neo4j
+    links:
+      - neo4j
+    depends_on:
+      - neo4j
