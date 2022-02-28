@@ -1,7 +1,9 @@
+import time
 import websocket
 import json
 import os
 import time
+import requests
 from waiting import wait
 from neo4j import GraphDatabase
 
@@ -13,12 +15,35 @@ SATOSHI_TO_BITCOIN = 100000000
 
 import_query = """
 CREATE (t:Transaction)
-SET t.hash = $hash, t.timestamp = $timestamp, t.totalAmount = toFloat($total_amount)
-FOREACH (f in $from_address | MERGE (a:Address {id:f.address}) CREATE (a)-[:SENT {value:toFloat(f.value)}]->(t))
-FOREACH (to in $to_address | MERGE (a:Address {id:to.address}) CREATE (t)-[:SENT {value: toFloat(to.value)}]->(a))
+SET t.hash = $hash, t.timestamp = datetime($timestamp), t.totalAmount = toFloat($total_amount), t.totalUSD = toFloat($total_usd)
+FOREACH (f in $from_address | MERGE (a:Address {id:f.address}) CREATE (a)-[:SENT {value:toFloat(f.value), valueUSD: toFloat(f.value_usd)}]->(t))
+FOREACH (to in $to_address | MERGE (a:Address {id:to.address}) CREATE (t)-[:SENT {value: toFloat(to.value), valueUSD: toFloat(to.value_usd)}]->(a))
 """
 
 x = 0
+
+
+class BitcoinPrice():
+    def __init__(self):
+        self.url = "https://blockchain.info/ticker"
+        self.update_price()
+
+    def update_price(self):
+        try:
+            data = requests.get(self.url).json()
+            priceUSD = data["USD"]["15m"]
+            self.priceUSD = priceUSD
+            self.last_updated = time.time()
+            print(f"Bitcoin price updated at {self.priceUSD}")
+        except Exception as e:
+            print(f"Failed fetching latest bitcoin price")
+
+    def get_price(self):
+        if time.time() - self.last_updated < (60 * 60):
+            return self.priceUSD
+        else:
+            self.update_price()
+            return self.priceUSD
 
 
 def test_connection():
@@ -42,16 +67,20 @@ def wait_valid_connection():
 
 
 def on_message(ws, message):
-    global session, x
+    global session, x, bp
 
     message = json.loads(message)
 
+    # Get current bitcoin price
+    btc_to_usd = bp.get_price()
+
     # Data preparation
     hash = message["x"]["hash"]
-    timestamp = time.strftime("%Y-%m-%d\n%H:%M:%S",
+    timestamp = time.strftime("%Y-%m-%dT%H:%M:%S",
                               time.localtime(message["x"]["time"]))
     total_amount = sum([int(output["value"]) /
                         SATOSHI_TO_BITCOIN for output in message["x"]["out"]])
+    total_usd = total_amount * btc_to_usd
 
     # Define from addresses
     from_address = list()
@@ -59,7 +88,8 @@ def on_message(ws, message):
         if not row['prev_out']['addr']:
             continue
         from_address.append({'address': row["prev_out"]["addr"], 'value': int(
-            row["prev_out"]["value"]) / SATOSHI_TO_BITCOIN})
+            row["prev_out"]["value"]) / SATOSHI_TO_BITCOIN, 'value_usd': int(
+            row["prev_out"]["value"]) / SATOSHI_TO_BITCOIN * btc_to_usd})
 
     # Define to address
     to_address = list()
@@ -67,10 +97,10 @@ def on_message(ws, message):
         if not row['addr']:
             continue
         to_address.append(
-            {'address': row['addr'], 'value': int(row['value']) / SATOSHI_TO_BITCOIN})
+            {'address': row['addr'], 'value': int(row['value']) / SATOSHI_TO_BITCOIN, 'value_usd': int(row['value']) / SATOSHI_TO_BITCOIN * btc_to_usd})
 
     # Define Cypher params
-    params = {'hash': hash, 'timestamp': timestamp, 'total_amount': total_amount,
+    params = {'hash': hash, 'timestamp': timestamp, 'total_amount': total_amount, 'total_usd': total_usd,
               'from_address': from_address, 'to_address': to_address}
     # Import data
     try:
@@ -93,13 +123,9 @@ def on_open(ws):
     ws.send('{"op":"unconfirmed_sub"}')
 
 
-def close_ws(ws):
-    time.sleep(opts["ws_time"][0])
-    ws.close()
-    sys.exit(0)
-
-
 if __name__ == '__main__':
+
+    bp = BitcoinPrice()
 
     driver = GraphDatabase.driver(
         NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASS))

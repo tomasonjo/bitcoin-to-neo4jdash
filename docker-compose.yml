@@ -14,6 +14,9 @@ services:
       - NEO4J_AUTH=neo4j/letmein
       - NEO4JLABS_PLUGINS=["apoc", "graph-data-science"]
       - NEO4J_dbms_security_procedures_unrestricted=apoc.*,gds.*
+      - NEO4J_dbms_memory_heap_initial__size=4G
+      - NEO4J_dbms_memory_heap_max__size=4G
+      - NEO4J_dbms_memory_pagecache_size=2G
   import:
     build:
       context: ./import
@@ -25,22 +28,21 @@ services:
     depends_on:
       - neo4j
   neodash:
-    image: nielsdejong/neodash
+    build:
+      context: https://github.com/nielsdejong/neodash.git#master:tools
+      args:
+        - standalone=true
+        - standaloneProtocol=neo4j
+        - standaloneHost=localhost
+        - standalonePort=7687
+        - standaloneDatabase=neo4j
+        - standaloneDashboardName=Bitcoin
+        - standaloneDashboardDatabase=neo4j
     restart: always
     hostname: neodash
     container_name: neodash
+    network_mode: bridge
     ports:
-      - 8080:8080
-    environment:
-      - port=8080
-      - standalone=true
-      - standaloneProtocol=neo4j
-      - standaloneHost=neo4j
-      - standalonePort=7687
-      - standaloneDatabase=neo4j
-      - standaloneDashboardName=Bitcoin
-      - standaloneDashboardDatabase=neo4j
-    links:
-      - neo4j
+      - 80:80
     depends_on:
       - neo4j
