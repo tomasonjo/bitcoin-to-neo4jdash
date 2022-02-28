@@ -46,7 +46,7 @@ class BitcoinPrice():
             return self.priceUSD
 
 
-def test_connection():
+def test_neo4j_connection():
     global driver
     with driver.session() as session:
         try:
@@ -62,12 +62,19 @@ def wait_valid_connection():
     """
     Function that waits for Neo4j connection to be valid
     """
-    print("Testing neo4j connection")
-    wait(test_connection, timeout_seconds=300, sleep_seconds=5)
+    wait(test_neo4j_connection, timeout_seconds=300, sleep_seconds=5)
 
 
 def on_message(ws, message):
+    """
+    Function gets executed for every new message it receives from the websocket
+    """
     global session, x, bp
+
+    # Hearbeat every 1000 transactions
+    if x % 1000 == 0:
+        print(f"Imported {x} transactions")
+    x += 1
 
     message = json.loads(message)
 
@@ -82,7 +89,7 @@ def on_message(ws, message):
                         SATOSHI_TO_BITCOIN for output in message["x"]["out"]])
     total_usd = total_amount * btc_to_usd
 
-    # Define from addresses
+    # Define from addresses and their values
     from_address = list()
     for row in message["x"]["inputs"]:
         if not row['prev_out']['addr']:
@@ -91,7 +98,7 @@ def on_message(ws, message):
             row["prev_out"]["value"]) / SATOSHI_TO_BITCOIN, 'value_usd': int(
             row["prev_out"]["value"]) / SATOSHI_TO_BITCOIN * btc_to_usd})
 
-    # Define to address
+    # Define to address and their values
     to_address = list()
     for row in message["x"]["out"]:
         if not row['addr']:
@@ -106,20 +113,18 @@ def on_message(ws, message):
     try:
         session.run(import_query, params)
     except Exception as e:
-        print(e)
-
-    # Ping every 1000 transactions
-    x += 1
-    if x % 1000 == 0:
-        print(f"Imported {x} transactions already")
+        print(f"Import to Neo4j failed due to {e}")
 
 
 def on_error(ws, error):
-    print(error)
+    print(f"Websocket error:{error}")
+    if error == "Connection to remote host was lost.":
+        ws.send('{"op":"unconfirmed_sub"}')
 
 
 def on_open(ws):
     print("Websocket connection opened")
+    # Subscribing to Unconfirmed transactions
     ws.send('{"op":"unconfirmed_sub"}')
 
 
@@ -131,9 +136,10 @@ if __name__ == '__main__':
         NEO4J_URI, auth=(NEO4J_USER, NEO4J_PASS))
 
     # Wait until connection to neo4j has been established
+    print("Testing Neo4j connection")
     wait_valid_connection()
-
     print("Connection to Neo4j established")
+
     with driver.session() as session:
         ws = websocket.WebSocketApp(
             "wss://ws.blockchain.info/inv",

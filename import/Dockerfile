@@ -5,9 +5,9 @@ RUN apt-get update && mkdir importservice/
 COPY ./requirements.txt /importservice/requirements.txt
 RUN pip3 install -r /importservice/requirements.txt
 
-
-
 COPY ./main.py /importservice/main.py
 WORKDIR /importservice
 
-CMD ["python3", "main.py"]
+ENV PYTHONUNBUFFERED=1
+
+CMD ["python3","main.py"]
