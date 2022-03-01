@@ -15,9 +15,10 @@ SATOSHI_TO_BITCOIN = 100000000
 
 import_query = """
 CREATE (t:Transaction)
-SET t.hash = $hash, t.timestamp = datetime($timestamp), t.totalAmount = toFloat($total_amount), t.totalUSD = toFloat($total_usd)
-FOREACH (f in $from_address | MERGE (a:Address {id:f.address}) CREATE (a)-[:SENT {value:toFloat(f.value), valueUSD: toFloat(f.value_usd)}]->(t))
-FOREACH (to in $to_address | MERGE (a:Address {id:to.address}) CREATE (t)-[:SENT {value: toFloat(to.value), valueUSD: toFloat(to.value_usd)}]->(a))
+SET t.hash = $hash, t.timestamp = datetime($timestamp), t.totalBTC = toFloat($total_amount), t.totalUSD = toFloat($total_usd),
+    t.flowBTC = toFloat($flow_btc), t.flowUSD = toFloat($flow_usd)
+FOREACH (f in $from_address | MERGE (a:Address {id:f.address}) CREATE (a)-[:SENT {valueBTC:toFloat(f.value), valueUSD: toFloat(f.value_usd)}]->(t))
+FOREACH (to in $to_address | MERGE (a:Address {id:to.address}) CREATE (t)-[:SENT {valueBTC: toFloat(to.value), valueUSD: toFloat(to.value_usd)}]->(a))
 """
 
 x = 0
@@ -91,9 +92,13 @@ def on_message(ws, message):
 
     # Define from addresses and their values
     from_address = list()
+    # Addresses to be ignored while calculating the actual flow of value
+    ignore_address = list()
+
     for row in message["x"]["inputs"]:
         if not row['prev_out']['addr']:
             continue
+        ignore_address.append(row["prev_out"]["addr"])
         from_address.append({'address': row["prev_out"]["addr"], 'value': int(
             row["prev_out"]["value"]) / SATOSHI_TO_BITCOIN, 'value_usd': int(
             row["prev_out"]["value"]) / SATOSHI_TO_BITCOIN * btc_to_usd})
@@ -106,9 +111,16 @@ def on_message(ws, message):
         to_address.append(
             {'address': row['addr'], 'value': int(row['value']) / SATOSHI_TO_BITCOIN, 'value_usd': int(row['value']) / SATOSHI_TO_BITCOIN * btc_to_usd})
 
+    # Define how much value has actually been transfered
+    # Ignore outgoing transactions that have the same addresses as incoming addresses, which return value to the original sender
+
+    flow_btc = sum([int(output["value"]) /
+                    SATOSHI_TO_BITCOIN for output in message["x"]["out"] if not output['addr'] in ignore_address])
+    flow_usd = flow_btc * btc_to_usd
+
     # Define Cypher params
     params = {'hash': hash, 'timestamp': timestamp, 'total_amount': total_amount, 'total_usd': total_usd,
-              'from_address': from_address, 'to_address': to_address}
+              'from_address': from_address, 'to_address': to_address, 'flow_btc': flow_btc, 'flow_usd': flow_usd}
     # Import data
     try:
         session.run(import_query, params)
@@ -118,14 +130,25 @@ def on_message(ws, message):
 
 def on_error(ws, error):
     print(f"Websocket error:{error}")
-    if error == "Connection to remote host was lost.":
-        ws.send('{"op":"unconfirmed_sub"}')
+    ws.close()
+    connect_websocket()
 
 
 def on_open(ws):
     print("Websocket connection opened")
     # Subscribing to Unconfirmed transactions
     ws.send('{"op":"unconfirmed_sub"}')
+
+
+def connect_websocket():
+    ws = websocket.WebSocketApp(
+        "wss://ws.blockchain.info/inv",
+        on_message=on_message,
+        on_error=on_error,
+        on_open=on_open
+    )
+
+    ws.run_forever()
 
 
 if __name__ == '__main__':
@@ -141,11 +164,4 @@ if __name__ == '__main__':
     print("Connection to Neo4j established")
 
     with driver.session() as session:
-        ws = websocket.WebSocketApp(
-            "wss://ws.blockchain.info/inv",
-            on_message=on_message,
-            on_error=on_error,
-            on_open=on_open
-        )
-
-        ws.run_forever()
+        connect_websocket()
