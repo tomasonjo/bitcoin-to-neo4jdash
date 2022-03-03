@@ -29,7 +29,7 @@ services:
       - neo4j
   neodash:
     build:
-      context: https://github.com/nielsdejong/neodash.git#master:tools
+      context: https://github.com/nielsdejong/neodash.git#master
       args:
         - standalone=true
         - standaloneProtocol=neo4j
