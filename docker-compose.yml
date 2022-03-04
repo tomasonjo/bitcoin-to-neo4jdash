@@ -43,6 +43,6 @@ services:
     container_name: neodash
     network_mode: bridge
     ports:
-      - 80:80
+      - 80:5005
     depends_on:
       - neo4j
