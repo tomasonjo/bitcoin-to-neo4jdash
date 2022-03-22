@@ -3,6 +3,8 @@ Project that listens to bitcoin websocket API for new transactions and stores th
 
 ![](img/btc.png)
 
+Article available at: https://medium.com/neo4j/real-time-dashboard-of-bitcoin-transactions-with-neo4j-and-neodash-ecfda0ba2c9b
+
 
 ## Getting started
 
